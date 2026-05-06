@@ -1,24 +1,21 @@
-// Marginalia — Phase 1A (still-marginalia revision).
+// Marginalia — Phase 1A + 1B-pin.
 //
-// Pivot from first iteration:
-//   Drift removed. Continuous motion in the user's periphery was hostile to
-//   focused attention while reading/writing. Marginalia in real books do not
-//   move; they sit in the gutter and wait. We honor that.
-//
-// Now:
-//   - 6 fixed slots (3 left margin, 3 right margin)
-//   - Layout stable across regen cycles — eye learns to ignore until summoned
-//   - Old orbits fade out → DOM swap → new orbits fade in on regen
-//   - Hover unchanged (drift pause is moot now; expansion bubble fades in)
+// Six fixed margin slots (3 left, 3 right). User-summoned only.
+// Click any orbit's fragment to pin/unpin — pinned orbits survive across
+// summons; only unpinned slots get replaced. The worker is asked for
+// exactly the number of fresh fragments needed (1-6), saving tokens when
+// most slots are pinned.
 
 const WORKER_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
   ? "http://localhost:8787/orbits"
   : "https://marginalia-api.qav2.workers.dev/orbits";
-const IDLE_MS        = 600;        // typing settles after this many ms of no input
-const FIRST_REGEN_MS = 1000;       // first orbit set arrives ~1s after pasting/pause
-const REGEN_MS       = 12000;      // subsequent regen cadence
+
+const IDLE_MS        = 600;
+const FIRST_REGEN_MS = 1000;
+const REGEN_MS       = 12000;
 const CONTEXT_CHARS  = 1500;
-const FADE_OUT_MS    = 280;        // matches CSS .orbit opacity transition
+const FADE_OUT_MS    = 280;
+const NUM_SLOTS      = 6;
 
 const $canvas      = document.getElementById("canvas");
 const $field       = document.getElementById("orbit-field");
@@ -28,18 +25,46 @@ const $statusState = document.getElementById("status-state");
 const $statusN     = document.getElementById("status-orbits");
 const $summon      = document.getElementById("summon");
 
-let orbits = [];
+// Each slot is null OR { el, fragment, expansion, pinned, hovered, leaveTimer }
+let slots = new Array(NUM_SLOTS).fill(null);
 let typing = false;
 let typingTimer = null;
 let regenTimer = null;
 let lastRegen = 0;
 let regenInflight = false;
 
+// ── Slot accessors ───────────────────────────────────────────────
+
+function getOrbitCount() {
+  return slots.filter(Boolean).length;
+}
+
+function getPinnedCount() {
+  return slots.filter((s) => s && s.pinned).length;
+}
+
+function getRefreshableSlotIndices() {
+  // Slots that are either empty OR occupied by an unpinned orbit.
+  // These are the slots a regen will touch.
+  const indices = [];
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    if (!slots[i] || !slots[i].pinned) indices.push(i);
+  }
+  return indices;
+}
+
 function setStatus(state, n, isError = false) {
   $statusState.textContent = state;
   if (n !== undefined) $statusN.textContent = `${n} orbit${n === 1 ? "" : "s"}`;
   $status.classList.toggle("error", isError);
 }
+
+function updateSummonState() {
+  const allPinned = getPinnedCount() === NUM_SLOTS;
+  $summon.disabled = regenInflight || allPinned;
+}
+
+// ── Cursor-aware context ─────────────────────────────────────────
 
 function getCursorOffsetInCanvas() {
   const sel = window.getSelection();
@@ -58,28 +83,25 @@ function getContext() {
 
   const cursor = getCursorOffsetInCanvas();
   if (cursor === null) {
-    // No active cursor in canvas → trailing window
     return text.slice(-CONTEXT_CHARS);
   }
-  // Cursor present → window centered on cursor (clamped to text bounds)
   const half = Math.floor(CONTEXT_CHARS / 2);
   let start = Math.max(0, cursor - half);
   let end = Math.min(text.length, start + CONTEXT_CHARS);
-  start = Math.max(0, end - CONTEXT_CHARS); // re-clamp if end hit the tail
+  start = Math.max(0, end - CONTEXT_CHARS);
   return text.slice(start, end);
 }
 
 // ── Typing / idle / regen scheduling ─────────────────────────────
 
 $canvas.addEventListener("input", () => {
-  if (!typing) setStatus("typing", orbits.length);
+  if (!typing) setStatus("typing", getOrbitCount());
   typing = true;
   cancelRegen();
   clearTimeout(typingTimer);
   typingTimer = setTimeout(onIdle, IDLE_MS);
 });
 
-// Strip rich formatting on paste — pasted text inherits the manuscript style.
 $canvas.addEventListener("paste", (e) => {
   e.preventDefault();
   const text = (e.clipboardData || window.clipboardData).getData("text/plain");
@@ -88,11 +110,11 @@ $canvas.addEventListener("paste", (e) => {
 
 function onIdle() {
   typing = false;
-  setStatus("idle", orbits.length);
-  // Auto-summon happens ONCE — on the first idle when we have context but no
-  // orbits yet. After that, the user owns the refresh rate via the summon
-  // button. The mind needs time to process; we don't refresh on a timer.
-  if (orbits.length > 0) return;
+  setStatus("idle", getOrbitCount());
+  // Auto-summon happens ONCE — only when all slots are empty AND we have
+  // context. If even one orbit (pinned or unpinned) exists, the user owns
+  // the refresh rate via the summon button.
+  if (getOrbitCount() > 0) return;
   if (getContext().trim().length < 50) return;
   scheduleRegen(FIRST_REGEN_MS);
 }
@@ -120,12 +142,10 @@ function getSlotPosition(slotIndex, orbitW, orbitH) {
   const isLeft = slotIndex < 3;
   const row = slotIndex % 3;
 
-  // Vertical: 3 evenly-spaced rows centered in the field
   const fieldH = fieldRect.height;
   const rowCenter = (fieldH / 4) * (row + 1); // 25%, 50%, 75%
   const y = Math.max(12, Math.min(fieldH - orbitH - 12, rowCenter - orbitH / 2));
 
-  // Horizontal: centered within the available margin band
   let x;
   if (isLeft) {
     const marginW = Math.max(0, cL);
@@ -163,11 +183,8 @@ function makeOrbit({ fragment, expansion }) {
 
   $field.appendChild(el);
 
-  const o = { el, fragment, expansion, hovered: false, leaveTimer: null };
+  const o = { el, fragment, expansion, pinned: false, hovered: false, leaveTimer: null };
 
-  // Hover with a 250ms grace period: lets you move the mouse from the
-  // fragment to the expansion bubble (across the visual gap) without the
-  // bubble vanishing before you can read it.
   el.addEventListener("mouseenter", () => {
     if (o.leaveTimer) { clearTimeout(o.leaveTimer); o.leaveTimer = null; }
     o.hovered = true;
@@ -181,35 +198,58 @@ function makeOrbit({ fragment, expansion }) {
     }, 250);
   });
 
+  // Click on the FRAGMENT toggles pin. Click on the bubble selects text
+  // (so you can highlight a phrase from the expansion without accidentally
+  // pinning/unpinning).
+  frag.addEventListener("click", (e) => {
+    e.stopPropagation();
+    o.pinned = !o.pinned;
+    el.classList.toggle("pinned", o.pinned);
+    updateSummonState();
+    setStatus(typing ? "typing" : "idle", getOrbitCount());
+  });
+
   return o;
 }
 
-function fadeOutAll() {
+function fadeOutUnpinned() {
+  const targets = slots.filter((s) => s && !s.pinned);
   return new Promise((resolve) => {
-    if (orbits.length === 0) return resolve();
-    for (const o of orbits) o.el.classList.remove("visible");
+    if (targets.length === 0) return resolve();
+    for (const o of targets) o.el.classList.remove("visible");
     setTimeout(resolve, FADE_OUT_MS);
   });
 }
 
-function clearOrbitsImmediate() {
-  for (const o of orbits) o.el.remove();
-  orbits = [];
+function clearUnpinnedSlots() {
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    if (slots[i] && !slots[i].pinned) {
+      slots[i].el.remove();
+      slots[i] = null;
+    }
+  }
 }
 
 // ── Regenerate ───────────────────────────────────────────────────
 
 async function regenerate() {
   if (regenInflight) return;
+
+  const targetSlots = getRefreshableSlotIndices();
+  if (targetSlots.length === 0) {
+    setStatus("all pinned", getOrbitCount());
+    return;
+  }
+
   regenInflight = true;
   $summon.disabled = true;
-  setStatus("listening", orbits.length);
+  setStatus("listening", getOrbitCount());
 
   try {
     const r = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ context: getContext() }),
+      body: JSON.stringify({ context: getContext(), count: targetSlots.length }),
     });
     if (!r.ok) {
       const detail = await r.text();
@@ -218,31 +258,30 @@ async function regenerate() {
     const data = await r.json();
     const items = (data.orbits || [])
       .filter((it) => it && it.fragment && it.expansion)
-      .slice(0, 6);
+      .slice(0, targetSlots.length);
 
-    await fadeOutAll();
-    clearOrbitsImmediate();
+    await fadeOutUnpinned();
+    clearUnpinnedSlots();
 
     for (let i = 0; i < items.length; i++) {
+      const slotIndex = targetSlots[i];
       const o = makeOrbit(items[i]);
-      orbits.push(o);
-      // Two rAFs: one for the browser to render with opacity 0 at slot,
-      // one for the transition to fire when .visible is added.
+      slots[slotIndex] = o;
       requestAnimationFrame(() => {
-        placeOrbitInSlot(o, i);
+        placeOrbitInSlot(o, slotIndex);
         requestAnimationFrame(() => o.el.classList.add("visible"));
       });
     }
 
     lastRegen = performance.now();
-    setStatus(typing ? "typing" : "idle", orbits.length);
+    setStatus(typing ? "typing" : "idle", getOrbitCount());
   } catch (err) {
     console.error("[marginalia] regen failed", err);
-    setStatus(err.message.slice(0, 80), orbits.length, true);
-    lastRegen = performance.now(); // back off on failure too; don't hammer
+    setStatus(err.message.slice(0, 80), getOrbitCount(), true);
+    lastRegen = performance.now();
   } finally {
     regenInflight = false;
-    $summon.disabled = false;
+    updateSummonState();
   }
 }
 
@@ -250,19 +289,23 @@ async function regenerate() {
 
 $summon.addEventListener("click", () => {
   if (regenInflight) return;
-  if (getContext().trim().length < 50) {
-    setStatus("nothing to whisper to", orbits.length);
+  if (getPinnedCount() === NUM_SLOTS) {
+    setStatus("all pinned", getOrbitCount());
     return;
   }
-  cancelRegen(); // any pending auto-first-load can yield to the explicit ask
+  if (getContext().trim().length < 50) {
+    setStatus("nothing to whisper to", getOrbitCount());
+    return;
+  }
+  cancelRegen();
   regenerate();
 });
 
 // ── Resize: re-pin slots so orbits don't drift off-margin ────────
 
 window.addEventListener("resize", () => {
-  for (let i = 0; i < orbits.length; i++) {
-    placeOrbitInSlot(orbits[i], i);
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    if (slots[i]) placeOrbitInSlot(slots[i], i);
   }
 });
 

@@ -8,7 +8,7 @@ const SYSTEM = `You are a reader marking up the margins of a book the author has
 
 You are NOT the author. You read as readers actually read — bringing your own knowledge, blind spots, obsessions, and references. The author already has their own next thoughts; your job is to surface the readings they would otherwise never see.
 
-Generate 6 marginalia. Vary the perspectives they come FROM:
+Generate the marginalia the author asks for. Vary the perspectives they come FROM:
 - some from a reader who knows MORE than the author about a specific corner (etymology, comparative myth, music theory, sports, science, history, theology, law, anything)
 - some from a reader who knows LESS and asks what a curious outsider would ask
 - some from a reader who DISAGREES or notices a weak seam
@@ -18,7 +18,7 @@ Each fragment: ≤ 8 words. Specific to this passage. Not a completion of the au
 
 Each expansion: a single sentence, ≤ 30 words. A real reader's marginal note — agreement, disagreement, surprise, curiosity, parallel, citation — not a critic's verdict and not a polished restatement of what the author already wrote.
 
-Do NOT return 6 fragments that all sound like the author's own next thought. The author can already think those. Range across the kinds of readers a draft might encounter — scholarly, naive, hostile, enthusiastic, cross-disciplinary.
+Do NOT return fragments that all sound like the author's own next thought. The author can already think those. Range across the kinds of readers a draft might encounter — scholarly, naive, hostile, enthusiastic, cross-disciplinary.
 
 Output strict JSON only — no prose before or after, no code fences:
 { "orbits": [ { "fragment": "...", "expansion": "..." }, ... ] }`;
@@ -68,6 +68,7 @@ export default {
     catch { return json({ error: "invalid json" }, { status: 400 }, cors); }
 
     const context = String(body.context || "").slice(-1500);
+    const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || 6));
     if (context.trim().length < 50) {
       return json({ orbits: [] }, {}, cors);
     }
@@ -87,7 +88,7 @@ export default {
           system: SYSTEM,
           messages: [{
             role: "user",
-            content: `The author hands you this page from their working draft:\n---\n${context}\n---\n\nWrite 6 marginalia. JSON only.`,
+            content: `The author hands you this page from their working draft:\n---\n${context}\n---\n\nWrite ${count} marginalia. JSON only.`,
           }],
         }),
       });
