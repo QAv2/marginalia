@@ -1,0 +1,195 @@
+:root {
+  --ink: #1a1614;
+  --ink-soft: rgba(26, 22, 20, 0.55);
+  --parchment: #f4ede2;
+  --parchment-edge: #e8dfce;
+  --rubric: #8b1a1a;
+  --desk: #211d18;
+  --desk-grain: #2a2520;
+  --margin-cream: rgba(244, 237, 226, 0.55);
+  --margin-cream-active: rgba(244, 237, 226, 0.95);
+  --gutter-rule: rgba(139, 26, 26, 0.22);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background:
+    radial-gradient(ellipse at center, var(--desk-grain) 0%, var(--desk) 80%);
+  color: var(--ink);
+  font-family: 'EB Garamond', Georgia, serif;
+  overflow: hidden;
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+/* ── Orbital field ───────────────────────────────────────────── */
+
+#orbit-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.orbit {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  max-width: 260px;
+  opacity: 0;
+  transition: opacity 280ms ease;
+}
+
+.orbit.visible {
+  opacity: 1;
+}
+
+.orbit-fragment {
+  font-style: italic;
+  font-variant: small-caps;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  color: var(--margin-cream);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  transition: color 280ms ease, transform 280ms ease;
+  line-height: 1.3;
+}
+
+.orbit:hover .orbit-fragment {
+  color: var(--margin-cream-active);
+  transform: scale(1.04);
+}
+
+.orbit-expansion {
+  margin-top: 0.5em;
+  font-style: normal;
+  font-variant: normal;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: var(--ink);
+  background: var(--parchment);
+  padding: 0.65em 0.85em;
+  border-left: 2px solid var(--rubric);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.32),
+    0 1px 2px rgba(0, 0, 0, 0.18);
+  text-align: left;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.orbit:hover .orbit-expansion,
+.orbit.active .orbit-expansion {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Canvas (the manuscript) ─────────────────────────────────── */
+
+#canvas-frame {
+  position: relative;
+  z-index: 1;
+  width: min(680px, 88vw);
+  height: min(82vh, 880px);
+  background:
+    linear-gradient(to right, var(--parchment-edge) 0px, var(--parchment) 40px) no-repeat,
+    var(--parchment);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.55),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    inset 0 0 60px rgba(0, 0, 0, 0.04);
+  padding: 4rem 4rem 4rem 5rem;
+  overflow-y: auto;
+  border-left: 3px double var(--gutter-rule);
+}
+
+#canvas-frame::-webkit-scrollbar { width: 8px; }
+#canvas-frame::-webkit-scrollbar-track { background: transparent; }
+#canvas-frame::-webkit-scrollbar-thumb {
+  background: rgba(26, 22, 20, 0.15);
+  border-radius: 4px;
+}
+
+#canvas {
+  font-size: 1.15rem;
+  line-height: 1.72;
+  color: var(--ink);
+  outline: none;
+  min-height: 100%;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+#canvas:empty::before {
+  content: attr(data-placeholder);
+  color: rgba(26, 22, 20, 0.32);
+  font-style: italic;
+  font-size: 1.1rem;
+}
+
+#canvas p { margin-bottom: 1em; }
+#canvas h1, #canvas h2, #canvas h3 {
+  font-weight: 600;
+  margin: 1.2em 0 0.6em;
+  letter-spacing: 0.01em;
+}
+
+/* ── Status (bottom right, quiet) ────────────────────────────── */
+
+#status {
+  position: fixed;
+  bottom: 0.9rem;
+  left: 1.2rem;
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  letter-spacing: 0.12em;
+  color: rgba(244, 237, 226, 0.4);
+  z-index: 10;
+  pointer-events: none;
+}
+
+#status-state { margin-right: 0.8em; }
+#status.error #status-state { color: rgba(220, 100, 90, 0.8); }
+
+#summon {
+  position: fixed;
+  bottom: 0.7rem;
+  right: 1.2rem;
+  font-family: 'EB Garamond', Georgia, serif;
+  font-style: italic;
+  font-variant: small-caps;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  color: rgba(244, 237, 226, 0.55);
+  background: transparent;
+  border: 1px solid rgba(244, 237, 226, 0.25);
+  padding: 0.45em 1.1em;
+  cursor: pointer;
+  z-index: 10;
+  transition: color 220ms ease, border-color 220ms ease;
+}
+
+#summon:hover:not(:disabled) {
+  color: rgba(244, 237, 226, 0.95);
+  border-color: rgba(244, 237, 226, 0.6);
+}
+
+#summon:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
