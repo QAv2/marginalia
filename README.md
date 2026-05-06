@@ -4,69 +4,85 @@
 
 The reader-marginalia an author would otherwise never see.
 
-When a real reader marks up the margins of a book with their reactions, those notes stay with the reader — the author never gets that view. Marginalia closes the loop: paste your draft into the canvas, hand it to a reader (Claude), and see the kinds of marginal annotations they would have written. Cross-references, parallels from traditions you haven't cited, naive questions, sceptical pushback. Click `↻ summon` when you want a fresh set.
+When a real reader marks up the margins of a book with their reactions, those notes stay with the reader — the author never gets that view. Marginalia closes that loop: paste your draft into the canvas, hand it to a reader, and see the kind of marginal annotations they would have written. Cross-references, parallels from traditions you haven't cited, naive questions, skeptical pushback.
 
-## Phase 1A — orbits only
+Click `↻ summon` when you want a fresh set. Click any fragment to pin it across summons.
 
-This phase ships:
-- Paste/type into the central canvas
-- 6 orbital fragments drift in the margin (cream italic small-caps on dark)
-- Hover an orbit → drift pauses + parchment expansion bubble fades in
-- Frozen during typing; resumes ~600 ms after last keystroke
-- Regenerates ~1 s after first sustained pause, then every ~12 s
+## Heritage
 
-Pin / weave / silence affordances and the gesture layer arrive in Phase 1B+.
+Built with Claude. The system prompt was iterated against Claude's voice and reasoning depth, and the default reader is Claude Haiku 4.5 — that's what the tool was tuned for and where it feels most coherent.
+
+The architecture, however, is **model-agnostic**. The worker uses a provider-adapter pattern (see `worker/src/worker.js`); the Anthropic adapter is the first adapter, not the only code path. OpenAI, Mistral, local Ollama, or any chat-capable LLM can be added in roughly twenty lines. Pick your favorite reader. Off you go.
+
+## How it works
+
+Three pieces:
+
+- **Frontend** (`index.html`, `js/app.js`, `css/style.css`) — vanilla HTML/CSS/JS, no build step. Six fixed margin slots (3 left, 3 right) hold the marginalia. User-summoned only; no auto-refresh on a timer. The user owns the rate of arrival.
+- **Worker** (`worker/src/worker.js`) — Cloudflare Worker that proxies requests to whatever LLM provider you've configured. Holds the API key. Handles CORS. Returns 6 (or N) marginalia per call.
+- **System prompt** (in worker) — casts the model as a *reader* of the draft, not a commentator or assistant. Explicitly varies the perspectives the marginalia come *from* (more-knowledgeable / less-knowledgeable / disagreeing / cross-domain). Refuses author-echo by design.
 
 ## Run locally
 
 You need two terminals.
 
-### Terminal 1 — Cloudflare Worker (Anthropic proxy)
+**Terminal 1 — worker:**
 
-First-time setup:
+```bash
+cd worker
+echo 'ANTHROPIC_API_KEY=sk-ant-…' > .dev.vars
+chmod 600 .dev.vars
+npx wrangler dev
+```
 
-    cd ~/marginalia/worker
-    echo 'ANTHROPIC_API_KEY=sk-ant-…' > .dev.vars
-    chmod 600 .dev.vars
+**Terminal 2 — frontend:**
 
-Then on every dev session:
+```bash
+python3 -m http.server 8000
+```
 
-    npx wrangler dev
+Open `http://localhost:8000`. The frontend auto-detects `localhost` and routes to the local worker.
 
-Worker is now at `http://localhost:8787`.
-- `GET  /` → `marginalia worker ok`
-- `POST /orbits` → `{ orbits: [{ fragment, expansion }] }`
+## Host your own
 
-### Terminal 2 — frontend
+1. Fork this repo.
+2. Deploy the worker:
+   ```bash
+   cd worker
+   npx wrangler secret put ANTHROPIC_API_KEY   # paste your key
+   npx wrangler deploy
+   ```
+   Worker URL will be `https://marginalia-api.<your-subdomain>.workers.dev`.
+3. In `js/app.js`, point `WORKER_URL`'s production branch at your deployed worker.
+4. In `worker/wrangler.toml`, add your frontend's URL to `ALLOWED_ORIGINS`.
+5. Deploy the frontend (Netlify, Cloudflare Pages, GitHub Pages — anything that serves static files).
 
-    cd ~/marginalia
-    python3 -m http.server 8000
+## Swap providers
 
-Open `http://localhost:8000`.
+The worker uses an adapter pattern. To add a new provider:
 
-## Test substrate
+1. Open `worker/src/worker.js`. There are commented sketches for OpenAI and Ollama — uncomment one or write your own following the pattern.
+2. Each adapter is one async function: `({ systemPrompt, userMessage, model, env }) → string`. It calls the provider's chat-completion endpoint and returns the model's text response. Throw on error.
+3. Add the adapter to the `getProviders(env)` map: `name → { defaultModel, call }`.
+4. Set the provider's API key as a worker secret (`npx wrangler secret put OPENAI_API_KEY`).
+5. The frontend can then request that provider via the `provider` field in the POST body. Default stays whatever `DEFAULT_PROVIDER` points at.
 
-Paste a real piece of in-progress writing. Lorem ipsum will lie about whether the orbits are useful — they need real cognitive density to evaluate against.
+Request body shape:
 
-## Behavioral targets (Phase 1A)
+```json
+{
+  "context": "<= 1500 chars of the author's prose centered on the cursor>",
+  "count": 6,
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5-20251001"
+}
+```
 
-- 6 orbits per regen cycle
-- Fragment ≤ 8 words; expansion ≤ 30 words; both come from the same Haiku call
-- Idle threshold: 600 ms after last keystroke
-- First regen: ≥ 1 s after first idle (so a pasted draft surfaces orbits quickly)
-- Subsequent regen: every 12 s of sustained idle
-- Drift: ~8 px/s; freezes during typing; freezes when a single orbit is hovered
-- Bounce off field edges + canvas frame (orbits never drift over the writing area)
-- Context window sent to worker: trailing 1500 chars of canvas
+`provider` and `model` are optional — defaults apply. The response body now also returns `provider` and `model` so the frontend can confirm what served the request.
 
-## What to evaluate (the test script for Joe)
+## Architecture notes
 
-1. Paste in a real scroll draft (or any dense in-progress writing).
-2. Wait. Watch the first cycle of orbits arrive (~1.5 s).
-3. **First question — register fit:** do the fragments sound like marginalia in *your* voice, or do they sound like generic AI prompts? Don't grade individual fragments — grade the average across all six.
-4. **Second question — drift feel:** is the motion meditative, or fidgety? When you stop typing and look up, does the field feel alive or busy?
-5. **Third question — hover-expand:** when you hover an orbit, does the expansion *earn* the fragment? I.e., do you read the sentence and think "yes, that's what the fragment was pointing at" — or does it feel like a mismatch?
-6. Type for 30 s, stop, watch one full regen cycle (12 s pause). Does the fresh set feel responsive to where you ended up in the prose, or does it feel like it's still chasing the start?
-7. Cost check: open `wrangler dev` terminal — note request count. We should see one request per regen cycle, not per keystroke.
-
-Report back with: what feels right, what feels wrong, what surprised you, and one thing you wish were different. That's the input I need before Phase 1B.
+- **No drift.** Marginalia don't move. Real notes in real books don't drift across the page; the brain treats peripheral motion as interruption regardless of how slow it is. The orbits sit still until you summon a new set.
+- **No auto-refresh.** Notes get added when a reader has a thought, not on a timer. The mind needs processing time between intellectual stimuli; the user owns the rate.
+- **Reader-not-author voice.** The system prompt explicitly does NOT instruct the model to "match the author's register." Doing so produces author-echo. Instead it asks the model to vary the *origins* of the marginalia — sometimes more-knowledgeable than the author, sometimes less, sometimes disagreeing, sometimes connecting to a domain the author hasn't cited.
+- **Pin.** Click a fragment to pin it; the worker is then asked for only the count of fresh fragments needed (1-6). Token cost scales with what's actually requested.

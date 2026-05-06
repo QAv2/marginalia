@@ -219,3 +219,32 @@ html, body {
   opacity: 0.35;
   cursor: default;
 }
+
+/* Soft heritage colophon — model-agnostic acknowledgment, low-presence by
+   default, link brightens on hover. Sits in the visual gap between the
+   bottom-left status and the bottom-right summon button. */
+#colophon {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-variant: small-caps;
+  font-style: italic;
+  letter-spacing: 0.14em;
+  color: rgba(244, 237, 226, 0.28);
+  white-space: nowrap;
+  z-index: 9;
+}
+
+#colophon a {
+  color: rgba(244, 237, 226, 0.4);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(244, 237, 226, 0.18);
+  transition: color 220ms ease, border-color 220ms ease;
+}
+
+#colophon a:hover {
+  color: rgba(244, 237, 226, 0.8);
+  border-color: rgba(244, 237, 226, 0.5);
+}
