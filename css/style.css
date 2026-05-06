@@ -113,7 +113,8 @@ html, body {
   transition: opacity 220ms ease, transform 220ms ease;
 }
 
-.orbit.active .orbit-expansion {
+.orbit.active .orbit-expansion,
+.orbit.pinned .orbit-expansion {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
@@ -190,7 +191,97 @@ html, body {
 }
 
 #status-state { margin-right: 0.8em; }
+#status-orbits { margin-right: 0.8em; }
 #status.error #status-state { color: rgba(220, 100, 90, 0.8); }
+
+/* Mode toggle — same italic small-caps register as status, but interactive.
+   Reads as part of the quiet status line; clicking swaps stance. */
+#mode-toggle, #form-toggle {
+  pointer-events: auto;
+  font-family: inherit;
+  font-size: inherit;
+  font-variant: inherit;
+  letter-spacing: inherit;
+  font-style: italic;
+  color: rgba(244, 237, 226, 0.45);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(244, 237, 226, 0.25);
+  transition: color 220ms ease, border-color 220ms ease;
+}
+
+#mode-toggle { margin-right: 0.8em; }
+
+#mode-toggle:hover, #form-toggle:hover {
+  color: rgba(244, 237, 226, 0.95);
+  border-bottom-color: rgba(244, 237, 226, 0.6);
+}
+
+/* Form picker — drop-up popup. Same low-presence register as the rest of
+   the status row. Menu opens above the toggle (we are at the bottom of
+   the page) and closes on outside click or option select. */
+#form-picker {
+  position: relative;
+  pointer-events: auto;
+  display: inline-block;
+}
+
+.form-caret {
+  font-style: normal;
+  letter-spacing: 0;
+  margin-left: 0.15em;
+  display: inline-block;
+  transition: transform 180ms ease;
+}
+
+#form-picker.open .form-caret {
+  transform: rotate(180deg);
+}
+
+#form-menu {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0.35em 0;
+  min-width: 14em;
+  background: rgba(33, 29, 24, 0.98);
+  border: 1px solid rgba(244, 237, 226, 0.18);
+  box-shadow:
+    0 -8px 24px rgba(0, 0, 0, 0.45),
+    0 -2px 6px rgba(0, 0, 0, 0.25);
+  z-index: 20;
+}
+
+#form-menu[hidden] { display: none; }
+
+#form-menu li {
+  padding: 0.45em 1em;
+  font-style: italic;
+  color: rgba(244, 237, 226, 0.55);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+#form-menu li:hover {
+  color: rgba(244, 237, 226, 0.95);
+  background: rgba(244, 237, 226, 0.06);
+}
+
+#form-menu li.selected {
+  color: rgba(244, 237, 226, 0.95);
+}
+
+#form-menu li.selected::before {
+  content: "· ";
+  color: var(--rubric);
+  font-style: normal;
+  font-weight: 700;
+  margin-right: 0.2em;
+}
 
 #summon {
   position: fixed;

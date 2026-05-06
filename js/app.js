@@ -1,10 +1,14 @@
-// Marginalia — Phase 1A + 1B-pin.
+// Marginalia — Phase 1A + 1B-pin + 1B-stance.
 //
 // Six fixed margin slots (3 left, 3 right). User-summoned only.
 // Click any orbit's fragment to pin/unpin — pinned orbits survive across
 // summons; only unpinned slots get replaced. The worker is asked for
-// exactly the number of fresh fragments needed (1-6), saving tokens when
-// most slots are pinned.
+// exactly the number of fresh fragments needed, saving tokens when most
+// slots are pinned.
+//
+// Stance toggle (drafting / reading): drafting fills all six slots with
+// probing reader-of-working-draft fragments; reading fills three sparse
+// reader-of-finished-piece fragments and leaves the other slots empty.
 
 const WORKER_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
   ? "http://localhost:8787/orbits"
@@ -17,6 +21,14 @@ const CONTEXT_CHARS  = 1500;
 const FADE_OUT_MS    = 280;
 const NUM_SLOTS      = 6;
 
+// Mode config — count is the target *total* of occupied slots (pinned + fresh).
+const MODE_COUNTS = { drafting: 6, reading: 3 };
+const DEFAULT_MODE = "drafting";
+
+// Slot fill preference: alternate left-right so reading-mode 3-fills land
+// balanced (top-left, top-right, mid-left) instead of all on one side.
+const SLOT_PREFERENCE = [0, 3, 1, 4, 2, 5];
+
 const $canvas      = document.getElementById("canvas");
 const $field       = document.getElementById("orbit-field");
 const $frame       = document.getElementById("canvas-frame");
@@ -24,6 +36,10 @@ const $status      = document.getElementById("status");
 const $statusState = document.getElementById("status-state");
 const $statusN     = document.getElementById("status-orbits");
 const $summon      = document.getElementById("summon");
+const $modeToggle  = document.getElementById("mode-toggle");
+const $formPicker  = document.getElementById("form-picker");
+const $formToggle  = document.getElementById("form-toggle");
+const $formMenu    = document.getElementById("form-menu");
 
 // Each slot is null OR { el, fragment, expansion, pinned, hovered, leaveTimer }
 let slots = new Array(NUM_SLOTS).fill(null);
@@ -32,6 +48,11 @@ let typingTimer = null;
 let regenTimer = null;
 let lastRegen = 0;
 let regenInflight = false;
+let mode = (() => {
+  const stored = localStorage.getItem("marginalia_mode");
+  return MODE_COUNTS[stored] ? stored : DEFAULT_MODE;
+})();
+let form = localStorage.getItem("marginalia_form") || "";
 
 // ── Slot accessors ───────────────────────────────────────────────
 
@@ -43,14 +64,24 @@ function getPinnedCount() {
   return slots.filter((s) => s && s.pinned).length;
 }
 
+function getModeBudget() {
+  return MODE_COUNTS[mode] || NUM_SLOTS;
+}
+
 function getRefreshableSlotIndices() {
-  // Slots that are either empty OR occupied by an unpinned orbit.
-  // These are the slots a regen will touch.
-  const indices = [];
-  for (let i = 0; i < NUM_SLOTS; i++) {
-    if (!slots[i] || !slots[i].pinned) indices.push(i);
-  }
-  return indices;
+  // How many fresh orbits we want to add: mode budget minus pinned, floored at 0.
+  // (Pinned orbits exceed budget? Honor the user's pins; fetch nothing new.)
+  const want = Math.max(0, getModeBudget() - getPinnedCount());
+  if (want === 0) return [];
+  const candidates = SLOT_PREFERENCE.filter((i) => !slots[i] || !slots[i].pinned);
+  return candidates.slice(0, want);
+}
+
+function getEmptyTargetSlotsForUnpin() {
+  // Slots that should be cleared on a regen even if we don't refill them
+  // (over-budget unpinned orbits when switching from drafting → reading).
+  const refreshable = SLOT_PREFERENCE.filter((i) => !slots[i] || !slots[i].pinned);
+  return refreshable;
 }
 
 function setStatus(state, n, isError = false) {
@@ -60,8 +91,39 @@ function setStatus(state, n, isError = false) {
 }
 
 function updateSummonState() {
-  const allPinned = getPinnedCount() === NUM_SLOTS;
-  $summon.disabled = regenInflight || allPinned;
+  const budgetReached = getPinnedCount() >= getModeBudget();
+  $summon.disabled = regenInflight || budgetReached;
+}
+
+function renderModeLabel() {
+  if ($modeToggle) $modeToggle.textContent = mode;
+}
+
+function renderFormLabel() {
+  if (!$formToggle) return;
+  const label = form || "—";
+  // Preserve the caret element by rebuilding the button's text node carefully.
+  $formToggle.innerHTML = `${label} <span class="form-caret">▴</span>`;
+  // Mark the matching menu item as selected.
+  if ($formMenu) {
+    for (const li of $formMenu.querySelectorAll("li")) {
+      li.classList.toggle("selected", li.dataset.form === form);
+    }
+  }
+}
+
+function closeFormMenu() {
+  if (!$formPicker || !$formMenu) return;
+  $formMenu.hidden = true;
+  $formPicker.classList.remove("open");
+  if ($formToggle) $formToggle.setAttribute("aria-expanded", "false");
+}
+
+function openFormMenu() {
+  if (!$formPicker || !$formMenu) return;
+  $formMenu.hidden = false;
+  $formPicker.classList.add("open");
+  if ($formToggle) $formToggle.setAttribute("aria-expanded", "true");
 }
 
 // ── Cursor-aware context ─────────────────────────────────────────
@@ -256,7 +318,7 @@ async function regenerate() {
     const r = await fetch(WORKER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ context: getContext(), count: targetSlots.length }),
+      body: JSON.stringify({ context: getContext(), count: targetSlots.length, mode, form }),
     });
     if (!r.ok) {
       const detail = await r.text();
@@ -296,8 +358,8 @@ async function regenerate() {
 
 $summon.addEventListener("click", () => {
   if (regenInflight) return;
-  if (getPinnedCount() === NUM_SLOTS) {
-    setStatus("all pinned", getOrbitCount());
+  if (getPinnedCount() >= getModeBudget()) {
+    setStatus("at capacity", getOrbitCount());
     return;
   }
   if (getContext().trim().length < 50) {
@@ -308,6 +370,69 @@ $summon.addEventListener("click", () => {
   regenerate();
 });
 
+// ── Mode toggle (drafting ↔ reading) ─────────────────────────────
+
+if ($modeToggle) {
+  $modeToggle.addEventListener("click", () => {
+    if (regenInflight) return;
+    mode = mode === "drafting" ? "reading" : "drafting";
+    localStorage.setItem("marginalia_mode", mode);
+    renderModeLabel();
+    updateSummonState();
+    // Switching stance is a user-initiated action, so an immediate refresh
+    // is appropriate (matches the "user owns rate of arrival" rule —
+    // toggling IS the user trigger). Only fire if there's text to read.
+    if (getContext().trim().length >= 50 && getPinnedCount() < getModeBudget()) {
+      regenerate();
+    } else {
+      // Still clear over-budget unpinned orbits so the visual matches mode.
+      clearUnpinnedSlots();
+      setStatus(typing ? "typing" : "idle", getOrbitCount());
+    }
+  });
+}
+
+// ── Form picker (optional vocabulary-of-attention hint) ──────────
+
+if ($formToggle && $formMenu) {
+  $formToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if ($formMenu.hidden) openFormMenu();
+    else closeFormMenu();
+  });
+
+  $formMenu.addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-form]");
+    if (!li) return;
+    e.stopPropagation();
+    const next = li.dataset.form;
+    // Click the currently-selected option to unselect (back to no hint).
+    const newForm = (next === form) ? "" : next;
+    closeFormMenu();
+    if (newForm === form) return; // no-op (e.g. clicking "—" while already none)
+
+    form = newForm;
+    if (form) localStorage.setItem("marginalia_form", form);
+    else localStorage.removeItem("marginalia_form");
+    renderFormLabel();
+
+    // Form change is a user-initiated action — re-summon to apply, same
+    // pacing rule as mode toggle.
+    if (regenInflight) return;
+    if (getContext().trim().length >= 50 && getPinnedCount() < getModeBudget()) {
+      regenerate();
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!$formPicker.contains(e.target)) closeFormMenu();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$formMenu.hidden) closeFormMenu();
+  });
+}
+
 // ── Resize: re-pin slots so orbits don't drift off-margin ────────
 
 window.addEventListener("resize", () => {
@@ -316,4 +441,6 @@ window.addEventListener("resize", () => {
   }
 });
 
+renderModeLabel();
+renderFormLabel();
 setStatus("ready", 0);

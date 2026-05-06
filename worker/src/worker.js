@@ -1,8 +1,17 @@
 // Marginalia worker — model-agnostic reader-marginalia generator.
 //
-// POST /orbits   body: { context, count?, provider?, model? }
-//                resp: { orbits: [{ fragment, expansion }] }
+// POST /orbits   body: { context, count?, mode?, provider?, model? }
+//                       mode: "drafting" (default) | "reading"
+//                resp: { orbits: [{ fragment, expansion }], mode, provider, model }
 // GET  /         resp: "marginalia worker ok"
+//
+// Two stances:
+//   - DRAFTING: working-draft reader. Six probing fragments, varied skeptical
+//     and curious perspectives. The default — the author is mid-piece and
+//     wants the readings they would otherwise never see.
+//   - READING:  finished-piece reader. Three sparse fragments weighted toward
+//     recognition, association, and earned appreciation. The right stance for
+//     a piece that is done; the wrong stance for a piece in motion.
 //
 // Adding a new provider:
 //   1. Write an async function `callX({ systemPrompt, userMessage, model, env })`
@@ -15,11 +24,11 @@
 //      (default is whichever DEFAULT_PROVIDER points at — currently anthropic).
 //
 // Heritage: this code was iterated with Claude (Sonnet 4.6) and the default
-// adapter calls Claude Haiku 4.5 — that's what the system prompt was tuned
+// adapter calls Claude Haiku 4.5 — that's what the system prompts were tuned
 // against. The architecture is intentionally provider-agnostic; Anthropic is
 // the first adapter, not the only one.
 
-const SYSTEM = `You are a reader marking up the margins of a book the author has handed you in working draft.
+const SYSTEM_DRAFTING = `You are a reader marking up the margins of a book the author has handed you in working draft.
 
 You are NOT the author. You read as readers actually read — bringing your own knowledge, blind spots, obsessions, and references. The author already has their own next thoughts; your job is to surface the readings they would otherwise never see.
 
@@ -37,6 +46,57 @@ Do NOT return fragments that all sound like the author's own next thought. The a
 
 Output strict JSON only — no prose before or after, no code fences:
 { "orbits": [ { "fragment": "...", "expansion": "..." }, ... ] }`;
+
+const SYSTEM_READING = `You are a real reader marking up the margins of a finished piece the author has handed you.
+
+This is not a working draft. The author is not asking for edits, corrections, fact-checks, or seam-hunting. They are asking for the marginalia a reader leaves in their own copy — the notes that stay with the reader and the author never sees.
+
+What that looks like:
+- recognition — naming a structural move the piece is making, that the author may have made by instinct ("the inversion at the center is the whole engine")
+- association — a passage, tradition, or current the piece resonates with ("this echoes Borges in 'The Garden of Forking Paths'")
+- appreciation — terse, earned, the gutter checkmark ("yes" / "this lands" / "exactly")
+- attentive observation — the quiet note a careful reader would write to themselves about a voice, a choice, an inheritance
+
+What you DO NOT write:
+- corrections, fact-checks, "actually, X is Y not Z"
+- "have you considered" coaching questions
+- weak-seam hunting or naive-reader gotcha
+- anything an editor or critic would write — this piece is finished, the stance is reader
+
+Range across reader registers — scholarly, instinctive, cross-disciplinary, enthusiastic — but always read WITH the piece, not against it. If a fragment sounds like an editor, rewrite it.
+
+Each fragment: ≤ 8 words. Specific to this passage.
+Each expansion: 1–2 sentences, ≤ 50 words. A reader's voice in the gutter — not a critic's verdict.
+
+Marginalia in this mode is sparse and earned — fewer fragments than drafting-mode by design. Coverage is not the goal; resonance is.
+
+Output strict JSON only — no prose before or after, no code fences:
+{ "orbits": [ { "fragment": "...", "expansion": "..." }, ... ] }`;
+
+const MODES = {
+  drafting: { system: SYSTEM_DRAFTING, defaultCount: 6, frame: (ctx, n) =>
+    `The author hands you this page from their working draft:\n---\n${ctx}\n---\n\nWrite ${n} marginalia. JSON only.` },
+  reading:  { system: SYSTEM_READING,  defaultCount: 3, frame: (ctx, n) =>
+    `The author hands you this finished page and asks: what would a real reader write in the gutters?\n---\n${ctx}\n---\n\nWrite ${n} reader-marginalia (recognition, association, appreciation — not editorial). JSON only.` },
+};
+
+const DEFAULT_MODE = "drafting";
+
+// Form hints — optional vocabulary-of-attention block appended to the active
+// stance system prompt when the user picks a form. Stance controls reader
+// orientation (probing vs. appreciative); form controls reader vocabulary
+// (what readers of THIS kind of text specifically attend to). Absent form
+// signal → no append, default behavior preserved.
+const FORM_HINTS = {
+  "creative writing": `The piece is creative writing. A reader of creative work attends to: voice, image, cadence, structural moves, mythic or symbolic logic. Read the music alongside the meaning — what the prose is doing, not just what it says.`,
+  "fiction": `The piece is fiction. A reader of fiction attends to: character motivation, scene logic, dialogue rhythm, what is withheld vs. revealed, the relationship between narration and character, the choice of which moment to enter and which to leave.`,
+  "poetry": `The piece is poetry. A reader of poetry attends to: line break, sound, image, the gap, the gesture of white space, syntactic torque, what the form is enacting alongside what it states. The page is part of the poem.`,
+  "essay": `The piece is an essay (lyric, argumentative, or critical). A reader of essays attends to: how the position is earned, the relationship between voice and claim, the texture of digression and return, the moves that make a turn feel inevitable.`,
+  "memoir": `The piece is memoir or personal nonfiction. A reader of memoir attends to: voice, truth-telling, the relationship between the reflecting self and the remembered self, what is named and what is left unsaid, interiority and craft together.`,
+  "research paper": `The piece is academic or research writing. A reader of research attends to: the claim/evidence chain, methodology, scope of conclusions, prior art, where the argument is strongest and where it depends on assumed context.`,
+  "technical writing": `The piece is technical writing (documentation, spec, explainer). A reader of technical writing attends to: clarity, precision, edge cases, definition order, what an unfamiliar reader would need that is currently assumed, where examples earn their place.`,
+  "journalism": `The piece is journalism or reportage. A reader of journalism attends to: sourcing, accuracy, the narrative arc imposed on facts, scene vs. summary, where the writer's frame is visible and where it disappears.`,
+};
 
 // ── Provider adapters ────────────────────────────────────────────
 
@@ -162,7 +222,14 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/") {
-      return new Response("marginalia worker ok", { headers: cors });
+      return json({
+        ok: true,
+        modes: Object.keys(MODES),
+        forms: Object.keys(FORM_HINTS),
+        providers: Object.keys(getProviders(env)),
+        defaultProvider: DEFAULT_PROVIDER,
+        defaultMode: DEFAULT_MODE,
+      }, {}, cors);
     }
 
     if (request.method !== "POST" || url.pathname !== "/orbits") {
@@ -174,10 +241,20 @@ export default {
     catch { return json({ error: "invalid json" }, { status: 400 }, cors); }
 
     const context = String(body.context || "").slice(-1500);
-    const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || 6));
     if (context.trim().length < 50) {
       return json({ orbits: [] }, {}, cors);
     }
+
+    // Resolve mode
+    const modeName = MODES[body.mode] ? body.mode : DEFAULT_MODE;
+    const mode = MODES[modeName];
+    const count = Math.min(6, Math.max(1, parseInt(body.count, 10) || mode.defaultCount));
+
+    // Resolve optional form hint (appended to system prompt if recognized)
+    const formName = (body.form && FORM_HINTS[body.form]) ? body.form : "";
+    const systemPrompt = formName
+      ? `${mode.system}\n\n${FORM_HINTS[formName]}`
+      : mode.system;
 
     // Resolve provider + model
     const PROVIDERS = getProviders(env);
@@ -191,16 +268,18 @@ export default {
     }
     const model = body.model || adapter.defaultModel;
 
-    const userMessage = `The author hands you this page from their working draft:\n---\n${context}\n---\n\nWrite ${count} marginalia. JSON only.`;
+    const userMessage = mode.frame(context, count);
 
     let text;
     try {
-      text = await adapter.call({ systemPrompt: SYSTEM, userMessage, model, env });
+      text = await adapter.call({ systemPrompt, userMessage, model, env });
     } catch (err) {
       return json({
         error: "provider call failed",
         provider: providerName,
         model,
+        mode: modeName,
+        form: formName,
         detail: String(err.message || err),
       }, { status: 502 }, cors);
     }
@@ -214,11 +293,12 @@ export default {
         error: "model returned non-JSON",
         provider: providerName,
         model,
+        mode: modeName,
         raw: text.slice(0, 500),
       }, { status: 502 }, cors);
     }
 
     const orbits = Array.isArray(parsed.orbits) ? parsed.orbits : [];
-    return json({ orbits, provider: providerName, model }, {}, cors);
+    return json({ orbits, provider: providerName, model, mode: modeName, form: formName }, {}, cors);
   },
 };

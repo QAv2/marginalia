@@ -19,6 +19,21 @@
   <div id="status">
     <span id="status-state">ready</span>
     <span id="status-orbits">0 orbits</span>
+    <button id="mode-toggle" type="button" title="toggle reader stance — drafting (six probing fragments) or reading (three sparse, finished-piece marginalia)">drafting</button>
+    <span id="form-picker">
+      <button id="form-toggle" type="button" aria-haspopup="listbox" aria-expanded="false" title="optional form hint — calibrates what the reader attends to (poetry vs. research vs. memoir, etc.)">— <span class="form-caret">▴</span></button>
+      <ul id="form-menu" role="listbox" hidden>
+        <li role="option" data-form="">— (no hint)</li>
+        <li role="option" data-form="creative writing">creative writing</li>
+        <li role="option" data-form="fiction">fiction</li>
+        <li role="option" data-form="poetry">poetry</li>
+        <li role="option" data-form="essay">essay</li>
+        <li role="option" data-form="memoir">memoir</li>
+        <li role="option" data-form="research paper">research paper</li>
+        <li role="option" data-form="technical writing">technical writing</li>
+        <li role="option" data-form="journalism">journalism</li>
+      </ul>
+    </span>
   </div>
   <button id="summon" type="button" title="summon a fresh set of marginalia">↻ summon</button>
   <div id="colophon">built with claude · runs with any chat model · <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a></div>
