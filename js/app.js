@@ -39,8 +39,32 @@ function setStatus(state, n, isError = false) {
   $status.classList.toggle("error", isError);
 }
 
+function getCursorOffsetInCanvas() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!$canvas.contains(range.startContainer)) return null;
+  const measure = document.createRange();
+  measure.selectNodeContents($canvas);
+  measure.setEnd(range.startContainer, range.startOffset);
+  return measure.toString().length;
+}
+
 function getContext() {
-  return ($canvas.innerText || "").slice(-CONTEXT_CHARS);
+  const text = $canvas.innerText || "";
+  if (text.length <= CONTEXT_CHARS) return text;
+
+  const cursor = getCursorOffsetInCanvas();
+  if (cursor === null) {
+    // No active cursor in canvas → trailing window
+    return text.slice(-CONTEXT_CHARS);
+  }
+  // Cursor present → window centered on cursor (clamped to text bounds)
+  const half = Math.floor(CONTEXT_CHARS / 2);
+  let start = Math.max(0, cursor - half);
+  let end = Math.min(text.length, start + CONTEXT_CHARS);
+  start = Math.max(0, end - CONTEXT_CHARS); // re-clamp if end hit the tail
+  return text.slice(start, end);
 }
 
 // ── Typing / idle / regen scheduling ─────────────────────────────
@@ -51,6 +75,13 @@ $canvas.addEventListener("input", () => {
   cancelRegen();
   clearTimeout(typingTimer);
   typingTimer = setTimeout(onIdle, IDLE_MS);
+});
+
+// Strip rich formatting on paste — pasted text inherits the manuscript style.
+$canvas.addEventListener("paste", (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+  document.execCommand("insertText", false, text);
 });
 
 function onIdle() {
@@ -130,15 +161,22 @@ function makeOrbit({ fragment, expansion }) {
 
   $field.appendChild(el);
 
-  const o = { el, fragment, expansion, hovered: false };
+  const o = { el, fragment, expansion, hovered: false, leaveTimer: null };
 
+  // Hover with a 250ms grace period: lets you move the mouse from the
+  // fragment to the expansion bubble (across the visual gap) without the
+  // bubble vanishing before you can read it.
   el.addEventListener("mouseenter", () => {
+    if (o.leaveTimer) { clearTimeout(o.leaveTimer); o.leaveTimer = null; }
     o.hovered = true;
     el.classList.add("active");
   });
   el.addEventListener("mouseleave", () => {
-    o.hovered = false;
-    el.classList.remove("active");
+    o.leaveTimer = setTimeout(() => {
+      o.hovered = false;
+      el.classList.remove("active");
+      o.leaveTimer = null;
+    }, 250);
   });
 
   return o;

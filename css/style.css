@@ -67,7 +67,7 @@ html, body {
   line-height: 1.3;
 }
 
-.orbit:hover .orbit-fragment {
+.orbit.active .orbit-fragment {
   color: var(--margin-cream-active);
   transform: scale(1.04);
 }
@@ -93,10 +93,10 @@ html, body {
   transition: opacity 220ms ease, transform 220ms ease;
 }
 
-.orbit:hover .orbit-expansion,
 .orbit.active .orbit-expansion {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 /* ── Canvas (the manuscript) ─────────────────────────────────── */
@@ -131,8 +131,14 @@ html, body {
   color: var(--ink);
   outline: none;
   min-height: 100%;
+  max-width: 100%;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+#canvas * {
+  max-width: 100%;
 }
 
 #canvas:empty::before {
