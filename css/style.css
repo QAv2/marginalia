@@ -46,6 +46,9 @@ html, body {
   pointer-events: auto;
   cursor: default;
   user-select: none;
+  -webkit-user-drag: none;
+  user-drag: none;
+  -webkit-touch-callout: none;
   max-width: 260px;
   opacity: 0;
   transition: opacity 280ms ease;

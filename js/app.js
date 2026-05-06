@@ -170,16 +170,23 @@ function placeOrbitInSlot(o, slotIndex) {
 function makeOrbit({ fragment, expansion }) {
   const el = document.createElement("div");
   el.className = "orbit";
+  el.draggable = false;
 
   const frag = document.createElement("div");
   frag.className = "orbit-fragment";
   frag.textContent = fragment;
+  frag.draggable = false;
   el.appendChild(frag);
 
   const exp = document.createElement("div");
   exp.className = "orbit-expansion";
   exp.textContent = expansion;
+  exp.draggable = false;
   el.appendChild(exp);
+
+  // Belt + suspenders against browsers that still try to start a drag
+  // (Firefox in particular ignores -webkit-user-drag).
+  el.addEventListener("dragstart", (e) => e.preventDefault());
 
   $field.appendChild(el);
 
