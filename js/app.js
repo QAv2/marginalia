@@ -11,7 +11,9 @@
 //   - Old orbits fade out → DOM swap → new orbits fade in on regen
 //   - Hover unchanged (drift pause is moot now; expansion bubble fades in)
 
-const WORKER_URL     = "http://localhost:8787/orbits";
+const WORKER_URL = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+  ? "http://localhost:8787/orbits"
+  : "https://marginalia-api.qav2.workers.dev/orbits";
 const IDLE_MS        = 600;        // typing settles after this many ms of no input
 const FIRST_REGEN_MS = 1000;       // first orbit set arrives ~1s after pasting/pause
 const REGEN_MS       = 12000;      // subsequent regen cadence

@@ -4,7 +4,7 @@ compatibility_date = "2026-05-03"
 
 [vars]
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-ALLOWED_ORIGINS = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8888,http://127.0.0.1:8888"
+ALLOWED_ORIGINS = "https://marginalia-md.netlify.app,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8888,http://127.0.0.1:8888"
 
 # ANTHROPIC_API_KEY:
 #   local dev → put it in .dev.vars (gitignored)

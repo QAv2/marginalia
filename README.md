@@ -1,8 +1,10 @@
 # Marginalia
 
-Non-chat AI thinking surface. You write in the center; Claude generates orbital fragments that drift in the margins, each ready to expand to a sentence on hover.
+**Live: [marginalia-md.netlify.app](https://marginalia-md.netlify.app)**
 
-> *What Clippy could have been if Microsoft had respected the writer's attention.*
+The reader-marginalia an author would otherwise never see.
+
+When a real reader marks up the margins of a book with their reactions, those notes stay with the reader — the author never gets that view. Marginalia closes the loop: paste your draft into the canvas, hand it to a reader (Claude), and see the kinds of marginal annotations they would have written. Cross-references, parallels from traditions you haven't cited, naive questions, sceptical pushback. Click `↻ summon` when you want a fresh set.
 
 ## Phase 1A — orbits only
 
