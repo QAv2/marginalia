@@ -124,67 +124,78 @@ async function callAnthropic({ systemPrompt, userMessage, model, env }) {
   }
 
   const data = await r.json();
-  return data.content?.[0]?.text || "";
+  const text = data.content?.[0]?.text || "";
+  const usage = data.usage
+    ? { input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens }
+    : null;
+  return { text, usage };
 }
 
-// ── OpenAI sketch ─ uncomment + add OPENAI_API_KEY secret to enable ──
-//
-// async function callOpenAI({ systemPrompt, userMessage, model, env }) {
-//   if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set");
-//   const r = await fetch("https://api.openai.com/v1/chat/completions", {
-//     method: "POST",
-//     headers: {
-//       "Content-Type": "application/json",
-//       "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
-//     },
-//     body: JSON.stringify({
-//       model,
-//       max_tokens: 1500,
-//       response_format: { type: "json_object" },
-//       messages: [
-//         { role: "system", content: systemPrompt },
-//         { role: "user", content: userMessage },
-//       ],
-//     }),
-//   });
-//   if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text()).slice(0, 300)}`);
-//   const data = await r.json();
-//   return data.choices?.[0]?.message?.content || "";
-// }
+async function callOpenAI({ systemPrompt, userMessage, model, env }) {
+  if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set");
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
+  if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const data = await r.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const usage = data.usage
+    ? { input_tokens: data.usage.prompt_tokens, output_tokens: data.usage.completion_tokens }
+    : null;
+  return { text, usage };
+}
 
-// ── Ollama (local) sketch ─ point OLLAMA_HOST at your machine ──
-//
-// async function callOllama({ systemPrompt, userMessage, model, env }) {
-//   const host = env.OLLAMA_HOST || "http://localhost:11434";
-//   const r = await fetch(`${host}/api/chat`, {
-//     method: "POST",
-//     headers: { "Content-Type": "application/json" },
-//     body: JSON.stringify({
-//       model,
-//       stream: false,
-//       format: "json",
-//       messages: [
-//         { role: "system", content: systemPrompt },
-//         { role: "user", content: userMessage },
-//       ],
-//     }),
-//   });
-//   if (!r.ok) throw new Error(`ollama ${r.status}: ${(await r.text()).slice(0, 300)}`);
-//   const data = await r.json();
-//   return data.message?.content || "";
-// }
+async function callWorkersAI({ systemPrompt, userMessage, model, env }) {
+  if (!env.AI) throw new Error("Workers AI binding not configured");
+  const response = await env.AI.run(model, {
+    messages: [
+      { role: "system", content: systemPrompt + "\n\nIMPORTANT: Output strict JSON only — no prose, no code fences, no markdown. Just the raw JSON object." },
+      { role: "user", content: userMessage },
+    ],
+  });
+  return { text: response.response || "", usage: null };
+}
 
 // ── Provider registry ────────────────────────────────────────────
 
-function getProviders(env) {
-  return {
+const WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+
+function getProviders(env, userApiKey = "") {
+  const envWithUserKey = userApiKey
+    ? { ...env, ANTHROPIC_API_KEY: userApiKey, OPENAI_API_KEY: userApiKey }
+    : env;
+  const providers = {
     anthropic: {
       defaultModel: env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001",
-      call: callAnthropic,
+      call: (opts) => callAnthropic({ ...opts, env: envWithUserKey }),
     },
-    // openai:  { defaultModel: env.OPENAI_MODEL  || "gpt-4o-mini",            call: callOpenAI },
-    // ollama:  { defaultModel: env.OLLAMA_MODEL  || "llama3.2",               call: callOllama },
   };
+  if (userApiKey || env.OPENAI_API_KEY) {
+    providers.openai = {
+      defaultModel: env.OPENAI_MODEL || "gpt-4o-mini",
+      call: (opts) => callOpenAI({ ...opts, env: envWithUserKey }),
+    };
+  }
+  if (env.AI) {
+    providers.free = {
+      defaultModel: WORKERS_AI_MODEL,
+      call: (opts) => callWorkersAI({ ...opts, env }),
+    };
+  }
+  return providers;
 }
 
 const DEFAULT_PROVIDER = "anthropic";
@@ -198,7 +209,7 @@ function corsHeadersFor(request, env) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-User-Api-Key",
     "Vary": "Origin",
   };
 }
@@ -226,7 +237,8 @@ export default {
         ok: true,
         modes: Object.keys(MODES),
         forms: Object.keys(FORM_HINTS),
-        providers: Object.keys(getProviders(env)),
+        providers: Object.keys(getProviders(env, "")),
+        byokProviders: ["anthropic", "openai"],
         defaultProvider: DEFAULT_PROVIDER,
         defaultMode: DEFAULT_MODE,
       }, {}, cors);
@@ -256,8 +268,13 @@ export default {
       ? `${mode.system}\n\n${FORM_HINTS[formName]}`
       : mode.system;
 
-    // Resolve provider + model
-    const PROVIDERS = getProviders(env);
+    // Resolve provider + model.
+    // BYOK: if the client sends an X-User-Api-Key header, use it instead of
+    // the worker's own secret. The key is forwarded to the provider and never
+    // stored. This lets users bring their own billing without touching the
+    // shared quota.
+    const userApiKey = request.headers.get("X-User-Api-Key") || "";
+    const PROVIDERS = getProviders(env, userApiKey);
     const providerName = body.provider || env.DEFAULT_PROVIDER || DEFAULT_PROVIDER;
     const adapter = PROVIDERS[providerName];
     if (!adapter) {
@@ -270,9 +287,9 @@ export default {
 
     const userMessage = mode.frame(context, count);
 
-    let text;
+    let result;
     try {
-      text = await adapter.call({ systemPrompt, userMessage, model, env });
+      result = await adapter.call({ systemPrompt, userMessage, model, env });
     } catch (err) {
       return json({
         error: "provider call failed",
@@ -283,6 +300,9 @@ export default {
         detail: String(err.message || err),
       }, { status: 502 }, cors);
     }
+
+    const text = typeof result === "string" ? result : result.text;
+    const usage = (typeof result === "object" && result.usage) ? result.usage : null;
 
     let parsed;
     try {
@@ -299,6 +319,8 @@ export default {
     }
 
     const orbits = Array.isArray(parsed.orbits) ? parsed.orbits : [];
-    return json({ orbits, provider: providerName, model, mode: modeName, form: formName }, {}, cors);
+    const resp = { orbits, provider: providerName, model, mode: modeName, form: formName };
+    if (usage) resp.usage = usage;
+    return json(resp, {}, cors);
   },
 };

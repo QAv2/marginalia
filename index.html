@@ -4,17 +4,157 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Marginalia</title>
+  <meta name="description" content="The reader-marginalia an author would otherwise never see. Write in the canvas — an AI reader marks up the margins.">
+  <meta property="og:title" content="Marginalia">
+  <meta property="og:description" content="The reader-marginalia an author would otherwise never see. Write in the canvas — an AI reader marks up the margins.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://marginalia-md.netlify.app">
+  <meta property="og:image" content="https://marginalia-md.netlify.app/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Marginalia">
+  <meta name="twitter:description" content="The reader-marginalia an author would otherwise never see.">
+  <meta name="twitter:image" content="https://marginalia-md.netlify.app/og.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <div id="landing" hidden>
+    <div id="landing-card">
+      <h1>Marginalia</h1>
+      <p class="landing-thesis">The reader-marginalia an author would otherwise never see.</p>
+      <p>Write in the central canvas. When you're ready, press <kbd>↻ summon</kbd> — a reader marks up the margins the way Coleridge or Borges would: surprise, disagreement, cross-reference, recognition.</p>
+      <div class="landing-section">
+        <h2>Controls</h2>
+        <ul>
+          <li><strong>summon</strong> — generate a fresh set of marginalia</li>
+          <li><strong>click a fragment</strong> — pin it (survives the next summon)</li>
+          <li><strong>drafting / reading</strong> — toggle the reader's stance</li>
+          <li><strong>form hint</strong> — calibrate for poetry, essay, fiction, etc.</li>
+          <li><kbd>Cmd+.</kbd> silence &nbsp;·&nbsp; <kbd>Cmd+Shift+S</kbd> summon</li>
+        </ul>
+      </div>
+      <div class="landing-section">
+        <h2>Compute</h2>
+        <p>Each summon reads your text and generates a fresh set of marginalia. You have roughly <strong>25 free summons</strong> to try the tool — real Claude Haiku reads at no cost to you. After that, Marginalia switches to a free open model. Bring your own API key anytime via <kbd>⚙</kbd> to use your preferred provider at full quality.</p>
+        <p class="landing-trust">Your key stays in your browser. It is sent directly to your chosen provider, never logged, never stored on our server. The <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source is open</a> — verify for yourself.</p>
+      </div>
+      <div class="landing-actions">
+        <button id="landing-enter" type="button">Begin</button>
+        <a href="#" id="landing-readmore">read more</a>
+      </div>
+    </div>
+    <div id="landing-deep" hidden>
+      <div id="landing-deep-card">
+        <button id="landing-deep-back" type="button">&larr; back</button>
+        <h1>Marginalia</h1>
+        <p class="landing-thesis">The reader-marginalia an author would otherwise never see.</p>
+
+        <p>When a real reader marks up the margins of a book with their reactions, those notes stay with the reader — the author never gets that view. Marginalia closes that loop: paste your draft into the canvas, hand it to a reader, and see the kind of marginal annotations they would have written. Cross-references, parallels from traditions you haven't cited, naive questions, skeptical pushback.</p>
+
+        <div class="deep-section">
+          <h2>Heritage</h2>
+          <p>Built with Claude. The system prompt was iterated against Claude's voice and reasoning depth, and the default reader is Claude Haiku 4.5 — that's what the tool was tuned for and where it feels most coherent.</p>
+          <p>The architecture, however, is <strong>model-agnostic</strong>. The worker uses a provider-adapter pattern; the Anthropic adapter is the first adapter, not the only code path. OpenAI or any chat-capable LLM can be added in roughly twenty lines. Pick your favorite reader.</p>
+        </div>
+
+        <div class="deep-section">
+          <h2>How it works</h2>
+          <p>Three pieces:</p>
+          <ul>
+            <li><strong>Frontend</strong> — vanilla HTML/CSS/JS, no build step. Six fixed margin slots (3 left, 3 right) hold the marginalia. User-summoned only; no auto-refresh on a timer. The user owns the rate of arrival.</li>
+            <li><strong>Worker</strong> — Cloudflare Worker that proxies requests to whatever LLM provider you've configured. Holds the API key. Handles CORS. Returns up to 6 marginalia per call.</li>
+            <li><strong>System prompt</strong> — casts the model as a <em>reader</em> of the draft, not a commentator or assistant. Explicitly varies the perspectives the marginalia come from (more-knowledgeable, less-knowledgeable, disagreeing, cross-domain). Refuses author-echo by design.</li>
+          </ul>
+        </div>
+
+        <div class="deep-section">
+          <h2>Design principles</h2>
+          <ul>
+            <li><strong>No drift.</strong> Marginalia don't move. Real notes in real books don't drift across the page; the brain treats peripheral motion as interruption regardless of how slow it is. The orbits sit still until you summon a new set.</li>
+            <li><strong>No auto-refresh.</strong> Notes get added when a reader has a thought, not on a timer. The mind needs processing time between intellectual stimuli; the user owns the rate.</li>
+            <li><strong>Reader-not-author voice.</strong> The system prompt does not instruct the model to "match the author's register." Doing so produces author-echo. Instead it asks the model to vary the <em>origins</em> of the marginalia — sometimes more-knowledgeable, sometimes less, sometimes disagreeing, sometimes connecting to a domain the author hasn't cited.</li>
+            <li><strong>Pin economy.</strong> Click a fragment to pin it; the worker is then asked for only the count of fresh fragments needed. Token cost scales with what's actually requested.</li>
+          </ul>
+        </div>
+
+        <div class="deep-section">
+          <h2>Reader stances</h2>
+          <p><strong>Drafting</strong> — six probing fragments from varied perspectives. Four reader-types: one who knows more than the author, one who knows less, one who disagrees or notices a weak seam, and one who connects the passage to a completely different domain. The working-draft reader — skeptical, curious, cross-disciplinary.</p>
+          <p><strong>Reading</strong> — three sparse fragments weighted toward recognition (naming a structural move), association (cross-text resonance), and appreciation (the gutter checkmark). The finished-piece reader. If a fragment sounds like an editor, the system rewrites it.</p>
+          <p>An optional <strong>form hint</strong> (poetry, essay, fiction, memoir, technical writing, etc.) composes on top of whichever stance is active — same passage produces meaningfully different reads across combinations.</p>
+        </div>
+
+        <div class="deep-section">
+          <h2>Host your own</h2>
+          <ol>
+            <li>Fork the <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">repo</a>.</li>
+            <li>Deploy the worker: <code>cd worker && npx wrangler secret put ANTHROPIC_API_KEY && npx wrangler deploy</code></li>
+            <li>Point <code>WORKER_URL</code> in <code>js/app.js</code> at your deployed worker.</li>
+            <li>Add your frontend's URL to <code>ALLOWED_ORIGINS</code> in <code>worker/wrangler.toml</code>.</li>
+            <li>Deploy the frontend — Netlify, Cloudflare Pages, GitHub Pages, anything that serves static files.</li>
+          </ol>
+        </div>
+
+        <div class="deep-section">
+          <h2>Swap providers</h2>
+          <p>The worker uses an adapter pattern. Each adapter is one async function that calls a provider's chat-completion endpoint and returns the model's text response. Add it to the provider registry, set the API key as a worker secret, and the frontend can request it by name. The <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a> has full instructions and commented sketches for OpenAI and Ollama.</p>
+        </div>
+
+        <div class="deep-section">
+          <h2>Iteration history</h2>
+          <p>Marginalia was iterated through seven design passes, each informed by real writing sessions:</p>
+          <ol class="iteration-list">
+            <li>Drifting orbits, auto-refresh, matched register — <em>"fidgety, distracting"</em></li>
+            <li>Still orbits, auto-refresh — <em>"12 seconds feels chaotic"</em></li>
+            <li>Still orbits, user-summoned, matched register — <em>"it's just what I would probably write"</em></li>
+            <li>Still, user-summoned, outside-reader voice — <strong>landed Phase 1A</strong></li>
+            <li>Single-stance on creative text — <em>"feels like I dropped my narrative into a Facebook group"</em></li>
+            <li>Drafting / reading toggle — <strong>landed</strong>: <em>"these feel like things people would genuinely write in the margins"</em></li>
+            <li>Form-hint axis — <strong>landed</strong>: drafting + creative writing produced craft critique the tool literally couldn't reach before</li>
+          </ol>
+          <p>Each pivot is documented in the repo. The lessons generalize past this project.</p>
+        </div>
+
+        <div class="deep-section deep-footer">
+          <p>Built by <strong>Joe Van Horn</strong>. Margins are where readers have always done their thinking.</p>
+        </div>
+
+        <div class="landing-actions">
+          <button id="landing-deep-enter" type="button">Begin</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div id="stage">
+    <div id="file-bar">
+      <input type="file" id="file-input" accept=".txt,.md,.markdown,text/plain,text/markdown" hidden>
+      <button id="file-load" type="button" title="open a .txt or .md file">open</button>
+      <button id="file-save" type="button" title="save your work as .md">save</button>
+    </div>
     <div id="orbit-field"></div>
     <main id="canvas-frame">
       <div id="canvas" contenteditable="true" spellcheck="false" data-placeholder="Begin."></div>
     </main>
+  </div>
+  <div id="settings-panel" hidden>
+    <div class="settings-row">
+      <label for="settings-provider">provider</label>
+      <select id="settings-provider">
+        <option value="anthropic">anthropic</option>
+        <option value="openai">openai</option>
+      </select>
+    </div>
+    <div class="settings-row">
+      <label for="settings-model">model</label>
+      <input id="settings-model" type="text" placeholder="default" spellcheck="false">
+    </div>
+    <div class="settings-row">
+      <label for="settings-apikey">api key</label>
+      <input id="settings-apikey" type="password" placeholder="use shared key" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="settings-hint">your key is stored in your browser only — sent directly to your chosen provider, never logged, never stored on our server. <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">verify the source</a>.</div>
   </div>
   <div id="status">
     <span id="status-state">ready</span>
@@ -34,9 +174,41 @@
         <li role="option" data-form="journalism">journalism</li>
       </ul>
     </span>
+    <span id="trial-indicator" title="trial compute remaining"></span>
+    <button id="settings-toggle" type="button" title="model & api key settings">⚙</button>
   </div>
+  <button id="dismiss" type="button" title="clear all marginalia from the margins" hidden>✕ clear</button>
   <button id="summon" type="button" title="summon a fresh set of marginalia">↻ summon</button>
-  <div id="colophon">built with claude · runs with any chat model · <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a></div>
+  <div id="colophon">built with claude · runs with any chat model · <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a> · <a href="#" id="about-link">about</a></div>
+  <div id="about" hidden>
+    <div id="about-card">
+      <button id="about-close" type="button" title="close">&times;</button>
+      <h1>About Marginalia</h1>
+      <div class="about-section">
+        <h2>What it is</h2>
+        <p>Marginalia is a thinking surface for writers. You write in a central canvas; an AI reader marks up the margins — the way Coleridge, Borges, or any thoughtful reader would annotate a book they were genuinely reading.</p>
+        <p>The thesis is simple: <em>the reader-marginalia an author would otherwise never see.</em> When a real reader marks up the margins of a book, those notes stay with the reader — the author never gets that view. Marginalia closes that loop.</p>
+      </div>
+      <div class="about-section">
+        <h2>How it works</h2>
+        <p>When you press <strong>summon</strong>, your text is sent to a language model that reads it as a reader — not an editor, not an assistant. The model generates short marginal fragments (surprise, disagreement, cross-reference, recognition) and returns them. Nothing is stored. Your text is not used for training. Each summon is a single read — the model has no memory between summons.</p>
+        <p>Two reader stances are available: <strong>drafting</strong> (six probing fragments from varied perspectives — skeptical, curious, cross-disciplinary) and <strong>reading</strong> (three sparse fragments weighted toward recognition and appreciation, for finished work). An optional <strong>form hint</strong> (poetry, essay, fiction, etc.) calibrates what the reader attends to.</p>
+      </div>
+      <div class="about-section">
+        <h2>What it provides</h2>
+        <p>Writers already know what they think. The next thought is always available. What's harder to access is the <em>reader's</em> experience — the marginal note from someone who knows more about etymology, or less about your subject, or who disagrees with your framing, or who connects your passage to a tradition you haven't cited.</p>
+        <p>Marginalia surfaces those readings. Not corrections. Not coaching. Not "have you considered." The genuine marginalia of a reader who took the work seriously for what it is.</p>
+      </div>
+      <div class="about-section">
+        <h2>Architecture</h2>
+        <p>Marginalia is model-agnostic and open source. The default reader is Claude Haiku, but the system is designed to work with any chat-capable language model. A free trial seed lets you try the tool without an API key. After that, bring your own key for any supported provider, or continue with the free open model.</p>
+        <p>Your API key is stored in your browser only — sent directly to your chosen provider, never logged, never stored on the server. The <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">full source</a> is open for inspection.</p>
+      </div>
+      <div class="about-section about-footer">
+        <p>Built by <strong>Joe Van Horn</strong>. The tool was developed with Claude and iterated through seven design passes, each informed by real writing sessions. The illuminated-manuscript aesthetic is intentional — margins are where readers have always done their thinking.</p>
+      </div>
+    </div>
+  </div>
   <script src="js/app.js"></script>
 </body>
 </html>

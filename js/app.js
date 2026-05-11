@@ -35,11 +35,21 @@ const $frame       = document.getElementById("canvas-frame");
 const $status      = document.getElementById("status");
 const $statusState = document.getElementById("status-state");
 const $statusN     = document.getElementById("status-orbits");
+const $dismiss     = document.getElementById("dismiss");
 const $summon      = document.getElementById("summon");
 const $modeToggle  = document.getElementById("mode-toggle");
 const $formPicker  = document.getElementById("form-picker");
 const $formToggle  = document.getElementById("form-toggle");
 const $formMenu    = document.getElementById("form-menu");
+const $trialIndicator = document.getElementById("trial-indicator");
+const $settingsToggle = document.getElementById("settings-toggle");
+const $settingsPanel  = document.getElementById("settings-panel");
+const $settingsProvider = document.getElementById("settings-provider");
+const $settingsModel    = document.getElementById("settings-model");
+const $settingsApiKey   = document.getElementById("settings-apikey");
+const $fileInput = document.getElementById("file-input");
+const $fileLoad  = document.getElementById("file-load");
+const $fileSave  = document.getElementById("file-save");
 
 // Each slot is null OR { el, fragment, expansion, pinned, hovered, leaveTimer }
 let slots = new Array(NUM_SLOTS).fill(null);
@@ -48,11 +58,65 @@ let typingTimer = null;
 let regenTimer = null;
 let lastRegen = 0;
 let regenInflight = false;
+let silencedUntil = 0;
 let mode = (() => {
   const stored = localStorage.getItem("marginalia_mode");
   return MODE_COUNTS[stored] ? stored : DEFAULT_MODE;
 })();
 let form = localStorage.getItem("marginalia_form") || "";
+let userProvider = localStorage.getItem("marginalia_provider") || "";
+let userModel = localStorage.getItem("marginalia_model") || "";
+let userApiKey = localStorage.getItem("marginalia_apikey") || "";
+
+// ── Trial budget ────────────────────────────────────────────────
+// Haiku 4.5 pricing: $0.80/MTok input, $4.00/MTok output.
+const TRIAL_BUDGET_CENTS = 5;
+const HAIKU_INPUT_COST  = 0.80 / 1_000_000;  // dollars per token
+const HAIKU_OUTPUT_COST = 4.00 / 1_000_000;
+
+function getTrialSpent() {
+  return parseFloat(localStorage.getItem("marginalia_trial_spent") || "0");
+}
+
+function addTrialCost(usage) {
+  if (!usage) return;
+  const cost = (usage.input_tokens * HAIKU_INPUT_COST) + (usage.output_tokens * HAIKU_OUTPUT_COST);
+  const total = getTrialSpent() + cost;
+  localStorage.setItem("marginalia_trial_spent", total.toFixed(6));
+  return total;
+}
+
+function trialRemaining() {
+  return Math.max(0, (TRIAL_BUDGET_CENTS / 100) - getTrialSpent());
+}
+
+function isTrialExhausted() {
+  return trialRemaining() <= 0;
+}
+
+function isByok() {
+  return userApiKey.length > 0;
+}
+
+const APPROX_COST_PER_SUMMON = 0.002;
+
+function updateTrialDisplay() {
+  if (!$trialIndicator) return;
+  if (isByok()) {
+    $trialIndicator.textContent = "using your key";
+    $trialIndicator.classList.remove("exhausted");
+    return;
+  }
+  const remaining = trialRemaining();
+  if (remaining <= 0) {
+    $trialIndicator.textContent = "trial complete · free model active";
+    $trialIndicator.classList.add("exhausted");
+  } else {
+    const summonsLeft = Math.max(1, Math.round(remaining / APPROX_COST_PER_SUMMON));
+    $trialIndicator.textContent = `~${summonsLeft} free summons remaining`;
+    $trialIndicator.classList.remove("exhausted");
+  }
+}
 
 // ── Slot accessors ───────────────────────────────────────────────
 
@@ -93,6 +157,7 @@ function setStatus(state, n, isError = false) {
 function updateSummonState() {
   const budgetReached = getPinnedCount() >= getModeBudget();
   $summon.disabled = regenInflight || budgetReached;
+  if ($dismiss) $dismiss.hidden = getOrbitCount() === 0;
 }
 
 function renderModeLabel() {
@@ -178,6 +243,7 @@ function onIdle() {
   // the refresh rate via the summon button.
   if (getOrbitCount() > 0) return;
   if (getContext().trim().length < 50) return;
+  if (Date.now() < silencedUntil) return;
   scheduleRegen(FIRST_REGEN_MS);
 }
 
@@ -220,7 +286,12 @@ function getSlotPosition(slotIndex, orbitW, orbitH) {
   return { x, y };
 }
 
+function isMobile() {
+  return window.innerWidth <= 768;
+}
+
 function placeOrbitInSlot(o, slotIndex) {
+  if (isMobile()) return; // CSS handles layout via flexbox on narrow screens
   const w = o.el.offsetWidth || 200;
   const h = o.el.offsetHeight || 30;
   const { x, y } = getSlotPosition(slotIndex, w, h);
@@ -242,8 +313,26 @@ function makeOrbit({ fragment, expansion }) {
 
   const exp = document.createElement("div");
   exp.className = "orbit-expansion";
-  exp.textContent = expansion;
   exp.draggable = false;
+
+  const expText = document.createElement("span");
+  expText.textContent = expansion;
+  exp.appendChild(expText);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "orbit-copy";
+  copyBtn.type = "button";
+  copyBtn.textContent = "copy";
+  copyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const text = `${fragment} — ${expansion}`;
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = "copied";
+      setTimeout(() => { copyBtn.textContent = "copy"; }, 1200);
+    });
+  });
+  exp.appendChild(copyBtn);
+
   el.appendChild(exp);
 
   // Belt + suspenders against browsers that still try to start a drag
@@ -299,6 +388,26 @@ function clearUnpinnedSlots() {
   }
 }
 
+function clearAllSlots() {
+  for (let i = 0; i < NUM_SLOTS; i++) {
+    if (slots[i]) {
+      slots[i].el.remove();
+      slots[i] = null;
+    }
+  }
+  setStatus("cleared", 0);
+  updateSummonState();
+}
+
+// ── Dismiss button ──────────────────────────────────────────────
+
+if ($dismiss) {
+  $dismiss.addEventListener("click", () => {
+    if (getOrbitCount() === 0) return;
+    clearAllSlots();
+  });
+}
+
 // ── Regenerate ───────────────────────────────────────────────────
 
 async function regenerate() {
@@ -315,10 +424,23 @@ async function regenerate() {
   setStatus("listening", getOrbitCount());
 
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (userApiKey) headers["X-User-Api-Key"] = userApiKey;
+    const payload = { context: getContext(), count: targetSlots.length, mode, form };
+
+    // Provider resolution: BYOK key → user's chosen provider.
+    // No BYOK + trial exhausted → free model. Otherwise → shared Anthropic.
+    if (isByok()) {
+      if (userProvider) payload.provider = userProvider;
+    } else if (isTrialExhausted()) {
+      payload.provider = "free";
+    }
+    if (userModel) payload.model = userModel;
+
     const r = await fetch(WORKER_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ context: getContext(), count: targetSlots.length, mode, form }),
+      headers,
+      body: JSON.stringify(payload),
     });
     if (!r.ok) {
       const detail = await r.text();
@@ -328,6 +450,12 @@ async function regenerate() {
     const items = (data.orbits || [])
       .filter((it) => it && it.fragment && it.expansion)
       .slice(0, targetSlots.length);
+
+    // Track cost against trial budget (only for shared-key requests).
+    if (!isByok() && data.usage) {
+      addTrialCost(data.usage);
+      updateTrialDisplay();
+    }
 
     await fadeOutUnpinned();
     clearUnpinnedSlots();
@@ -429,9 +557,104 @@ if ($formToggle && $formMenu) {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$formMenu.hidden) closeFormMenu();
+    if (e.key === "Escape") {
+      if (!$formMenu.hidden) closeFormMenu();
+      if ($settingsPanel && !$settingsPanel.hidden) closeSettings();
+      if ($about && !$about.hidden) $about.hidden = true;
+    }
   });
 }
+
+// ── Settings panel (BYOK) ───────────────────────────────────────
+
+function initSettings() {
+  if ($settingsProvider) $settingsProvider.value = userProvider || "anthropic";
+  if ($settingsModel) $settingsModel.value = userModel;
+  if ($settingsApiKey) $settingsApiKey.value = userApiKey;
+}
+
+function closeSettings() {
+  if ($settingsPanel) $settingsPanel.hidden = true;
+  if ($settingsToggle) $settingsToggle.classList.remove("active");
+}
+
+function openSettings() {
+  if ($settingsPanel) $settingsPanel.hidden = false;
+  if ($settingsToggle) $settingsToggle.classList.add("active");
+}
+
+if ($settingsToggle) {
+  $settingsToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if ($settingsPanel.hidden) openSettings();
+    else closeSettings();
+  });
+}
+
+if ($settingsProvider) {
+  $settingsProvider.addEventListener("change", () => {
+    userProvider = $settingsProvider.value;
+    if (userProvider && userProvider !== "anthropic") {
+      localStorage.setItem("marginalia_provider", userProvider);
+    } else {
+      userProvider = "";
+      localStorage.removeItem("marginalia_provider");
+    }
+  });
+}
+
+if ($settingsModel) {
+  $settingsModel.addEventListener("input", () => {
+    userModel = $settingsModel.value.trim();
+    if (userModel) localStorage.setItem("marginalia_model", userModel);
+    else localStorage.removeItem("marginalia_model");
+  });
+}
+
+if ($settingsApiKey) {
+  $settingsApiKey.addEventListener("input", () => {
+    userApiKey = $settingsApiKey.value.trim();
+    if (userApiKey) localStorage.setItem("marginalia_apikey", userApiKey);
+    else localStorage.removeItem("marginalia_apikey");
+    updateTrialDisplay();
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if ($settingsPanel && !$settingsPanel.hidden &&
+      !$settingsPanel.contains(e.target) &&
+      e.target !== $settingsToggle) {
+    closeSettings();
+  }
+});
+
+initSettings();
+
+// ── Keyboard shortcuts ──────────────────────────────────────────
+//   Cmd+.         → silence (clear all, suppress auto-summon 5 min)
+//   Cmd+Shift+S   → summon
+
+const SILENCE_DURATION_MS = 5 * 60 * 1000;
+
+document.addEventListener("keydown", (e) => {
+  const meta = e.metaKey || e.ctrlKey;
+
+  if (meta && e.key === ".") {
+    e.preventDefault();
+    clearAllSlots();
+    silencedUntil = Date.now() + SILENCE_DURATION_MS;
+    cancelRegen();
+    setStatus("silenced", 0);
+    return;
+  }
+
+  if (meta && e.shiftKey && (e.key === "S" || e.key === "s")) {
+    e.preventDefault();
+    silencedUntil = 0;
+    $summon.click();
+    return;
+  }
+});
 
 // ── Resize: re-pin slots so orbits don't drift off-margin ────────
 
@@ -443,4 +666,102 @@ window.addEventListener("resize", () => {
 
 renderModeLabel();
 renderFormLabel();
+updateTrialDisplay();
 setStatus("ready", 0);
+
+// ── File load / save ────────────────────────────────────────────
+
+let currentFileName = "marginalia.md";
+
+if ($fileLoad && $fileInput) {
+  $fileLoad.addEventListener("click", () => $fileInput.click());
+  $fileInput.addEventListener("change", () => {
+    const file = $fileInput.files[0];
+    if (!file) return;
+    currentFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      $canvas.innerText = e.target.result;
+      setStatus("loaded", 0);
+    };
+    reader.readAsText(file);
+    $fileInput.value = "";
+  });
+}
+
+if ($fileSave) {
+  $fileSave.addEventListener("click", () => {
+    const text = $canvas.innerText || "";
+    if (!text.trim()) return;
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = currentFileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+}
+
+// ── About overlay ───────────────────────────────────────────────
+
+const $about = document.getElementById("about");
+const $aboutLink = document.getElementById("about-link");
+const $aboutClose = document.getElementById("about-close");
+
+if ($aboutLink) {
+  $aboutLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    if ($about) $about.hidden = false;
+  });
+}
+
+if ($aboutClose) {
+  $aboutClose.addEventListener("click", () => {
+    if ($about) $about.hidden = true;
+  });
+}
+
+if ($about) {
+  $about.addEventListener("click", (e) => {
+    if (e.target === $about) $about.hidden = true;
+  });
+}
+
+// ── Landing overlay (first visit only) ──────────────────────────
+
+const $landing = document.getElementById("landing");
+const $landingEnter = document.getElementById("landing-enter");
+const $landingReadmore = document.getElementById("landing-readmore");
+const $landingDeep = document.getElementById("landing-deep");
+const $landingDeepBack = document.getElementById("landing-deep-back");
+const $landingDeepEnter = document.getElementById("landing-deep-enter");
+const $landingCard = document.getElementById("landing-card");
+
+function dismissLanding() {
+  if ($landing) $landing.hidden = true;
+  localStorage.setItem("marginalia_welcomed", "1");
+  $canvas.focus();
+}
+
+if ($landing && !localStorage.getItem("marginalia_welcomed")) {
+  $landing.hidden = false;
+
+  if ($landingEnter) $landingEnter.addEventListener("click", dismissLanding);
+  if ($landingDeepEnter) $landingDeepEnter.addEventListener("click", dismissLanding);
+
+  if ($landingReadmore) {
+    $landingReadmore.addEventListener("click", (e) => {
+      e.preventDefault();
+      if ($landingCard) $landingCard.hidden = true;
+      if ($landingDeep) $landingDeep.hidden = false;
+    });
+  }
+
+  if ($landingDeepBack) {
+    $landingDeepBack.addEventListener("click", () => {
+      if ($landingDeep) $landingDeep.hidden = true;
+      if ($landingCard) $landingCard.hidden = false;
+    });
+  }
+}

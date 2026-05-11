@@ -8,5 +8,7 @@ worker/.wrangler/
 *.swo
 .DS_Store
 
+gen_og.py
+
 # Local Netlify folder
 .netlify
