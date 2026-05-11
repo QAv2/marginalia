@@ -16,7 +16,6 @@ const WORKER_URL = (location.hostname === "localhost" || location.hostname === "
 
 const IDLE_MS        = 600;
 const FIRST_REGEN_MS = 1000;
-const REGEN_MS       = 12000;
 const CONTEXT_CHARS  = 1500;
 const FADE_OUT_MS    = 280;
 const NUM_SLOTS      = 6;
@@ -56,7 +55,6 @@ let slots = new Array(NUM_SLOTS).fill(null);
 let typing = false;
 let typingTimer = null;
 let regenTimer = null;
-let lastRegen = 0;
 let regenInflight = false;
 let silencedUntil = 0;
 let mode = (() => {
@@ -139,13 +137,6 @@ function getRefreshableSlotIndices() {
   if (want === 0) return [];
   const candidates = SLOT_PREFERENCE.filter((i) => !slots[i] || !slots[i].pinned);
   return candidates.slice(0, want);
-}
-
-function getEmptyTargetSlotsForUnpin() {
-  // Slots that should be cleared on a regen even if we don't refill them
-  // (over-budget unpinned orbits when switching from drafting → reading).
-  const refreshable = SLOT_PREFERENCE.filter((i) => !slots[i] || !slots[i].pinned);
-  return refreshable;
 }
 
 function setStatus(state, n, isError = false) {
@@ -470,12 +461,10 @@ async function regenerate() {
       });
     }
 
-    lastRegen = performance.now();
     setStatus(typing ? "typing" : "idle", getOrbitCount());
   } catch (err) {
     console.error("[marginalia] regen failed", err);
     setStatus(err.message.slice(0, 80), getOrbitCount(), true);
-    lastRegen = performance.now();
   } finally {
     regenInflight = false;
     updateSummonState();

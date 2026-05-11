@@ -99,7 +99,7 @@
 
         <div class="deep-section">
           <h2>Swap providers</h2>
-          <p>The worker uses an adapter pattern. Each adapter is one async function that calls a provider's chat-completion endpoint and returns the model's text response. Add it to the provider registry, set the API key as a worker secret, and the frontend can request it by name. The <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a> has full instructions and commented sketches for OpenAI and Ollama.</p>
+          <p>The worker uses an adapter pattern. Each adapter is one async function that calls a provider's chat-completion endpoint and returns the model's text response. Five providers ship out of the box — Anthropic, OpenAI, Mistral, Ollama, and a free Workers AI fallback. Add your own by following the pattern in the <a href="https://github.com/QAv2/marginalia" target="_blank" rel="noopener">source</a>.</p>
         </div>
 
         <div class="deep-section">
