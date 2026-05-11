@@ -158,6 +158,53 @@ async function callOpenAI({ systemPrompt, userMessage, model, env }) {
   return { text, usage };
 }
 
+async function callMistral({ systemPrompt, userMessage, model, env }) {
+  if (!env.MISTRAL_API_KEY) throw new Error("MISTRAL_API_KEY not set");
+  const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${env.MISTRAL_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
+  if (!r.ok) throw new Error(`mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const data = await r.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const usage = data.usage
+    ? { input_tokens: data.usage.prompt_tokens, output_tokens: data.usage.completion_tokens }
+    : null;
+  return { text, usage };
+}
+
+async function callOllama({ systemPrompt, userMessage, model, env }) {
+  const host = env.OLLAMA_HOST || "http://localhost:11434";
+  const r = await fetch(`${host}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      format: "json",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+    }),
+  });
+  if (!r.ok) throw new Error(`ollama ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const data = await r.json();
+  return { text: data.message?.content || "", usage: null };
+}
+
 async function callWorkersAI({ systemPrompt, userMessage, model, env }) {
   if (!env.AI) throw new Error("Workers AI binding not configured");
   const response = await env.AI.run(model, {
@@ -175,7 +222,7 @@ const WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 function getProviders(env, userApiKey = "") {
   const envWithUserKey = userApiKey
-    ? { ...env, ANTHROPIC_API_KEY: userApiKey, OPENAI_API_KEY: userApiKey }
+    ? { ...env, ANTHROPIC_API_KEY: userApiKey, OPENAI_API_KEY: userApiKey, MISTRAL_API_KEY: userApiKey }
     : env;
   const providers = {
     anthropic: {
@@ -187,6 +234,18 @@ function getProviders(env, userApiKey = "") {
     providers.openai = {
       defaultModel: env.OPENAI_MODEL || "gpt-4o-mini",
       call: (opts) => callOpenAI({ ...opts, env: envWithUserKey }),
+    };
+  }
+  if (userApiKey || env.MISTRAL_API_KEY) {
+    providers.mistral = {
+      defaultModel: env.MISTRAL_MODEL || "mistral-small-latest",
+      call: (opts) => callMistral({ ...opts, env: envWithUserKey }),
+    };
+  }
+  if (env.OLLAMA_HOST) {
+    providers.ollama = {
+      defaultModel: env.OLLAMA_MODEL || "llama3.2",
+      call: (opts) => callOllama({ ...opts, env }),
     };
   }
   if (env.AI) {
@@ -238,7 +297,7 @@ export default {
         modes: Object.keys(MODES),
         forms: Object.keys(FORM_HINTS),
         providers: Object.keys(getProviders(env, "")),
-        byokProviders: ["anthropic", "openai"],
+        byokProviders: ["anthropic", "openai", "mistral"],
         defaultProvider: DEFAULT_PROVIDER,
         defaultMode: DEFAULT_MODE,
       }, {}, cors);
